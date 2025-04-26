@@ -1,8 +1,7 @@
 // import { imageGenerationTool } from "./imageGeneration";
 
 import { BullQueue } from "@/utils/bull"; // The Bull queue setup
-
-import { IQuestion, ZQuestions } from "@/lib/types/question.types.ts"; // Updated import
+import { IQuestion, ZQuestions } from "@/lib/types/question.types"; // Updated import
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamObject } from "ai";
 import { sendEmailToAdmin } from "@/utils/Mailer/Mailer";

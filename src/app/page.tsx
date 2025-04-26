@@ -1,5 +1,5 @@
 "use client";
-import {ZQuestions } from "@/models/question";
+import {ZQuestions } from "@/lib/types/question.types";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
 export default function Home() {
   const { object, error, isLoading, submit } = useObject({
@@ -7,7 +7,7 @@ export default function Home() {
     schema: ZQuestions,
   });
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       <button
         onClick={() => {
           submit("create 10 question based on subject of physics");

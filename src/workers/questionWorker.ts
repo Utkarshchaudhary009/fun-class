@@ -1,5 +1,6 @@
 import { Worker, Job } from "bullmq";
-import { Question, IQuestion, UpsertQuestion } from "@/models/question";
+import { Question } from "@/models/question";
+import { IQuestion, UpsertQuestion } from "@/lib/types/question.types";
 import { redisConnection } from "@/utils/redisConfig";
 import connectToDatabase from "@/utils/db"; // Ensure DB connection is established
 import { sendEmailToAdmin } from "@/utils/Mailer/Mailer";
