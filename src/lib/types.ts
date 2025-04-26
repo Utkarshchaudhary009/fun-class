@@ -30,3 +30,9 @@ export type Job = {
   progress: number;
   status: string;
 };
+
+export type prop ={
+  params:Promise<{
+    topic:string
+  }>
+}
