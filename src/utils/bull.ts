@@ -19,11 +19,16 @@ export const BullQueue = new Queue(QUEUE_NAME, {
   },
 });
 
-BullQueue.on('error', async (error: Error) => {
+BullQueue.on("error", async (error: Error) => {
   console.error(`BullMQ Queue Error (${QUEUE_NAME}):`, error);
-  await sendEmailToAdmin(`BullMQ Queue Error (${QUEUE_NAME}):`, "error", "BullMQ Queue Error", error.message);
+  await sendEmailToAdmin(
+    `BullMQ Queue Error (${QUEUE_NAME}):`,
+    "error",
+    "BullMQ Queue Error",
+    error.message
+  );
   // Consider adding monitoring/alerting here
-});
+})
 
 console.log(`BullMQ queue '${QUEUE_NAME}' initialized successfully.`);
 

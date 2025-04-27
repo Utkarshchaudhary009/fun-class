@@ -4,9 +4,14 @@ import { IQuestion, UpsertQuestion } from "@/lib/types/question.types";
 import { redisConnection } from "@/utils/redisConfig";
 import connectToDatabase from "@/utils/db"; // Ensure DB connection is established
 import { sendEmailToAdmin } from "@/utils/Mailer/Mailer";
-import { Error } from "mongoose";
+import mongoose, { Error } from "mongoose";
 const QUEUE_NAME = "saveQuestion"; // Use a constant for the queue name
 import { uploadImage } from "@/utils/cloudinary";
+import { UserGameAnswer } from "@/models/userGameAnswer"; // Mongoose Model for UserGameAnswer
+import { IUserGameAnswer } from "@/lib/types/userGameAnswer.types";
+// run profile worker in worker.ts
+import "./ProfileWorker";
+
 connectToDatabase();
 
 console.log("Connected to database");
@@ -19,9 +24,9 @@ const functionForUpsertQuestion = async (
   const existingQuestion = await Question.findOne({ QuestionId: questionId });
   if (existingQuestion) {
     console.log("Question already exists");
-     const updatedQuestion = await existingQuestion.updateOne(question);
-     console.log(updatedQuestion);
-     return updatedQuestion;
+    const updatedQuestion = await existingQuestion.updateOne(question);
+    console.log(updatedQuestion);
+    return updatedQuestion;
   }
   const newQuestion = await new Question(question).save();
   console.log(newQuestion);
@@ -38,21 +43,32 @@ const questionWorker = new Worker(
       options,
       correctIndex,
       difficultyRating,
-
       source,
+      reference,
+      refernceTopic,
+      referncePage,
+      refrenceText,
+      solution,
       QuestionId,
+      userId,
     }: IQuestion = job.data;
 
     try {
       // Save question to MongoDB
       const newQuestion = await functionForUpsertQuestion(QuestionId, {
         QuestionId,
+        userId,
         gameId,
         text,
         options,
         correctIndex,
         difficultyRating, // Can be undefined if not provided
         source,
+        reference,
+        refernceTopic,
+        referncePage,
+        refrenceText,
+        solution,
       });
 
       console.log(
@@ -126,11 +142,12 @@ const saveImageWorker = new Worker(
   "saveImage",
   async (job: Job) => {
     console.log(`Processing job ${job.id} with data:`, job.data);
-    const { imageData, questionId, fileAlt } = job.data;
+    const { imageData, questionId, fileAlt, userId } = job.data;
     const image = await uploadImage(imageData);
     console.log(image);
     await functionForUpsertQuestion(questionId, {
       QuestionId: questionId,
+      userId,
       fileId: image,
       fileAlt: fileAlt,
     });
@@ -167,5 +184,79 @@ process.on("SIGTERM", async () => {
   console.log("Shutting down saveImage worker (SIGTERM)...");
   await saveImageWorker.close();
   console.log("saveImage worker shut down (SIGTERM).");
+  process.exit(0);
+});
+
+const saveAnswer = new Worker(
+  "saveAnswer",
+  async (job: Job) => {
+    console.log(`Processing job ${job.id} with data:`, job.data);
+    const data = job.data;
+    // Create a new entry in the UserGameAnswer model
+    try {
+      const userAnswer = new UserGameAnswer({
+        userId: data.userId,
+        questionId: data.questionId,
+        chosenOption: data.chosenOption,
+        isCorrect: data.isCorrect,
+        difficultyRating: data.difficultyRating,
+        responseTimeMs: data.responseTimeMs || 0,
+      } as IUserGameAnswer);
+
+      // Save the user's answer to the database
+      await userAnswer.save();
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        await sendEmailToAdmin(
+          "Error in storing user answer API",
+          "error",
+          "Error in storing user answer API",
+          "Invalid JSON format"
+        );
+      }
+
+      console.error("Error in storing user answer API:", error);
+      if (error instanceof mongoose.Error.ValidationError) {
+        await sendEmailToAdmin(
+          "Error in storing user answer API",
+          "error",
+          "Error in storing user answer API",
+          "Validation failed"
+        );
+      }
+    }
+  },
+  {
+    connection: redisConnection, // Use the shared Redis connection config
+    concurrency: 25, // Process up to 5 jobs concurrently
+    removeOnComplete: { count: 0 }, // Keep logs for last 1000 completed jobs
+    removeOnFail: { count: 10 }, // Keep logs for last 5000 failed jobs
+  }
+);
+
+saveAnswer.on("completed", (job: Job, result: string) => {
+  console.log(`Job ${job.id} completed successfully. Result:`, result);
+});
+
+saveAnswer.on("failed", (job: Job | undefined, err: Error) => {
+  console.error(`Job ${job?.id} failed. Error: ${err.message}`, err.stack);
+});
+
+saveAnswer.on("error", (err: Error) => {
+  console.error("BullMQ Worker Error:", err);
+});
+
+// Graceful shutdown handling
+process.on("SIGINT", async () => {
+  console.log("Shutting down saveAnswer worker...");
+  await saveAnswer.close();
+  console.log("saveAnswer worker shut down.");
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  console.log("Shutting down saveAnswer worker (SIGTERM)...");
+  await saveAnswer.close();
+  console.log("saveAnswer worker shut down (SIGTERM).");
   process.exit(0);
 });

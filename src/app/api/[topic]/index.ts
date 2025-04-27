@@ -1,12 +1,18 @@
 // import { imageGenerationTool } from "./imageGeneration";
-
+import { CoreMessage } from "ai";
 import { BullQueue } from "@/utils/bull"; // The Bull queue setup
-import { IQuestion, ZQuestions } from "@/lib/types/question.types"; // Updated import
+import {
+  IQuestion,
+  ZQuestions,
+  ZQuestionsWithReference,
+} from "@/lib/types/question.types"; // Updated import
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamObject } from "ai";
 import { sendEmailToAdmin } from "@/utils/Mailer/Mailer";
 import { tool } from "ai";
 import { imageGeneration } from "./imageGeneration";
+// import { auth } from "@clerk/nextjs/server";
+
 // Tool
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
@@ -42,12 +48,50 @@ export const google = createGoogleGenerativeAI({
 });
 
 // generate Question
+const MESSAGE = (prompt: string, fileUrl: string | null) =>
+  fileUrl
+    ? [
+        {
+          role: "system" as const,
+          content:
+            "You are a world-class educator and expert exam setter,specialized in creating that truly leads to topic master without fearing of the topic. Progress from basic to God level slowly.",
+        },
+        {
+          role: "user" as const,
+          content: [
+            {
+              type: "text" as const,
+              text: prompt,
+            },
+            {
+              type: "file" as const,
+              data: fileUrl,
+              mimeType: "application/pdf",
+            },
+          ],
+        },
+      ]
+    : [
+        {
+          role: "system" as const,
+          content:
+            "You are a world-class educator and expert exam setter,specialized in creating that truly leads to topic master without fearing of the topic. Progress from basic to God level slowly.",
+        },
+        {
+          role: "user" as const,
+          content: prompt,
+        },
+      ];
 
-export async function generateQuestion(prompt: string) {
+export const generateObject = async (
+  prompt: string,
+  fileUrl: string | null = null,
+  noOfQuestion: number = 10
+) => {
   const Response = streamObject({
     model: google("gemini-2.0-flash-exp"),
-    schema: ZQuestions,
-    prompt: prompt,
+    schema: fileUrl ? ZQuestionsWithReference : ZQuestions,
+    messages: MESSAGE(prompt, fileUrl) as CoreMessage[],
     // tools: {imageGenerationTool},
     onFinish: async (result) => {
       const questions = result.object as IQuestion[];
@@ -61,22 +105,33 @@ export async function generateQuestion(prompt: string) {
         );
         return;
       }
-      for (const question of questions) {
-        await BullQueue.add("saveQuestion", {
-          QuestionId: question.QuestionId,
-          gameId: question.gameId,
-          text: question.text,
-          options: question.options,
-          correctIndex: question.correctIndex,
-          difficultyRating: question.difficultyRating,
-          fileId: question.fileId || undefined,
-          source: question.source,
-        } as IQuestion);
+      const gameId = `q_${uuidv4()}`;
+      const { userId } = { userId: "test" };
+      if (userId) {
+        for (const question of questions) {
+          await BullQueue.add("saveQuestion", {
+            userId: userId,
+            QuestionId: question.QuestionId,
+            gameId: gameId,
+            text: question.text,
+            options: question.options,
+            correctIndex: question.correctIndex,
+            difficultyRating: question.difficultyRating,
+            fileId: question.fileId || undefined,
+            source: question.source,
+            reference: fileUrl || "",
+            refernceTopic: question.refernceTopic || "",
+            refrenceText: question.refrenceText || "",
+            solution: question.solution || "",
+            referncePage: question.referncePage || 0,
+          } as IQuestion);
+        }
       }
-      console.log("question generated", questions);
+      console.log(`${noOfQuestion} question generated`, questions);
     },
     onError: async (error) => {
       console.error("Error in generating question:", error);
+
       await sendEmailToAdmin(
         "Error in generating question",
         "error",
@@ -87,15 +142,49 @@ export async function generateQuestion(prompt: string) {
   });
 
   return Response;
-}
+};
 
-const main = async () => {
-  const response = await generateQuestion(
-    "create 10 question based on subject of physics concept dimentions and units"
-  );
-  for await (const partialObject of response.partialObjectStream) {
-    // console.clear();
-    console.log(partialObject);
+export const generateQuestion = async (
+  prompt: string,
+  fileUrl: string | null,
+  noOfQuestion: number
+) => {
+  for (let retry = 0; retry < 10; retry++) {
+    try {
+      const response = await generateObject(prompt, fileUrl, noOfQuestion);
+      return response;
+    } catch (error) {
+      if (retry < 10) {
+        console.error("Error in generating question:", error);
+        continue;
+      }
+      throw error;
+    }
   }
 };
-main();
+
+// const main = async () => {
+//   // const response = await generateQuestion(
+//   //   "create 5 question based on subject of physics concept dimentions and units",
+//   //   null,
+//   //   5
+//   // );
+//   // for await (const partialObject of response.partialObjectStream) {
+//   //   // console.clear();
+//   //   console.log(partialObject);
+//   // }
+//   const response2 = await generateQuestion(
+//     "create 5 question based on subject of physics concept dimentions and units",
+//     "https://gppanchkula.ac.in/wp-content/uploads/2020/03/PHYSICS-LEARNING-MATERIAL.pdf",
+//     5
+//   );
+//   if (response2) {
+//     for await (const partialObject of response2.partialObjectStream) {
+//       // console.clear();
+//       console.log(partialObject);
+//     }
+//   } else {
+//     console.error("Error in generating question:", response2);
+//   }
+// };
+// main();
